@@ -22,7 +22,10 @@ media tidak dikirim ke server atau layanan eksternal.
   MP2 untuk MPEG/MPG, OPUS untuk WEBM, dan AAC untuk MP4/MOV.
 - Validasi file input, ekstensi, rentang parameter, output yang sudah ada, dan
   kecocokan jenis media input/output.
+- Validasi container video agar stream video yang disalin tetap kompatibel.
+- Pesan kegagalan FFmpeg diringkas menjadi error yang relevan bagi pengguna.
 - Dokumentasi instalasi dan pemakaian dalam `README.md`.
+- Workflow GitHub Actions untuk pengujian di Windows dan Linux.
 
 ## Format yang Didukung
 
@@ -32,7 +35,7 @@ Video: MP4, MOV, M4V, MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
 
 ## Validasi Terakhir
 
-- 8 unit test lulus.
+- 14 unit test lulus.
 - Seluruh modul berhasil melalui pemeriksaan `py_compile`.
 - `pip check` melaporkan tidak ada dependensi yang rusak.
 - Uji end-to-end WAV berhasil menggunakan FFmpeg 7.1.

@@ -59,3 +59,13 @@ MOV, M4V, MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
 Jika ingin memakai instalasi FFmpeg sendiri, berikan lokasi executable melalui
 `--ffmpeg` atau environment variable `DENOISE_FFMPEG`.
 
+Untuk video, gunakan ekstensi output yang sama dengan input. Program menyalin
+stream video tanpa encode ulang agar proses tetap cepat dan kualitas gambar tidak
+berubah; konversi container atau codec video belum didukung.
+
+## Menjalankan tes
+
+```powershell
+$env:PYTHONPATH = "$PWD\src"
+python -m unittest discover -s tests -v
+```

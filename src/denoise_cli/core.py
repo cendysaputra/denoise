@@ -70,6 +70,24 @@ def default_output_path(input_path: Path) -> Path:
     return input_path.with_name(f"{input_path.stem}.denoised{input_path.suffix}")
 
 
+def _matching_media_kind(input_path: Path, output_path: Path) -> str:
+    input_kind = media_kind(input_path)
+    output_kind = media_kind(output_path)
+    if input_kind != output_kind:
+        raise DenoiseError(
+            "Jenis file input dan output harus sama-sama audio atau sama-sama video."
+        )
+    if (
+        input_kind == "video"
+        and input_path.suffix.lower() != output_path.suffix.lower()
+    ):
+        raise DenoiseError(
+            "Ekstensi output video harus sama dengan input karena stream video "
+            "disalin tanpa encode ulang."
+        )
+    return input_kind
+
+
 def resolve_ffmpeg(explicit_path: str | None = None) -> str:
     configured = explicit_path or os.environ.get("DENOISE_FFMPEG")
     if configured:
@@ -100,7 +118,13 @@ def denoise_filter(
     reduction: float | None = None,
     noise_floor: float | None = None,
 ) -> str:
-    preset = PRESETS[preset_name]
+    try:
+        preset = PRESETS[preset_name]
+    except KeyError as exc:
+        choices = ", ".join(PRESETS)
+        raise DenoiseError(
+            f"Preset '{preset_name}' tidak dikenal. Pilihan yang tersedia: {choices}."
+        ) from exc
     actual_reduction = preset.reduction if reduction is None else reduction
     actual_floor = preset.noise_floor if noise_floor is None else noise_floor
 
@@ -142,10 +166,13 @@ def build_ffmpeg_command(
     output_path: Path,
     audio_filter: str,
 ) -> list[str]:
-    kind = media_kind(input_path)
+    kind = _matching_media_kind(input_path, output_path)
+
     command = [
         ffmpeg_path,
         "-hide_banner",
+        "-loglevel",
+        "error",
         "-nostdin",
         "-y",
         "-i",
@@ -193,12 +220,7 @@ def process_media(
 
     if not input_path.is_file():
         raise DenoiseError(f"File input tidak ditemukan: {input_path}")
-    input_kind = media_kind(input_path)
-    output_kind = media_kind(output_path)
-    if input_kind != output_kind:
-        raise DenoiseError(
-            "Jenis file input dan output harus sama-sama audio atau sama-sama video."
-        )
+    _matching_media_kind(input_path, output_path)
     if input_path == output_path:
         raise DenoiseError("File input dan output tidak boleh sama.")
     if output_path.exists() and not force:
@@ -217,20 +239,35 @@ def process_media(
     if dry_run:
         return command
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        completed = subprocess.run(command, check=False)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         if completed.returncode != 0:
-            raise DenoiseError(
-                f"FFmpeg gagal memproses media (kode {completed.returncode})."
-            )
+            details = (completed.stderr or "").strip()
+            if details:
+                lines = [line.strip() for line in details.splitlines() if line.strip()]
+                summary = "\n".join(lines[-8:])
+                if len(summary) > 2000:
+                    summary = f"…{summary[-1999:]}"
+                raise DenoiseError(f"FFmpeg gagal memproses media:\n{summary}")
+            raise DenoiseError(f"FFmpeg gagal memproses media (kode {completed.returncode}).")
         if not temp_output.is_file():
             raise DenoiseError("FFmpeg selesai tetapi tidak menghasilkan file output.")
         temp_output.replace(output_path)
     except OSError as exc:
         raise DenoiseError(f"Tidak dapat menjalankan FFmpeg: {exc}") from exc
     finally:
-        if temp_output.exists():
-            temp_output.unlink()
+        try:
+            temp_output.unlink(missing_ok=True)
+        except OSError:
+            # Jangan menutupi penyebab kegagalan utama jika file sementara terkunci.
+            pass
 
     return command
