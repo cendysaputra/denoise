@@ -41,7 +41,8 @@ denoise --help                       # semua opsi
 ```
 
 Hasilnya `dist\denoise-gui.exe` dan `dist\denoise.exe`, yang bisa dipakai
-tanpa Python maupun internet.
+tanpa Python maupun internet. Jika executable dibagikan, sertakan
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (ikut tersalin ke `dist\`).
 
 ## Tes
 

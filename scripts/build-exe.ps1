@@ -52,6 +52,9 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable GUI." }
 
 & (Join-Path $root "dist\denoise.exe") --version
 if ($LASTEXITCODE -ne 0) { throw "Executable hasil build gagal dijalankan." }
+
+# Lisensi komponen pihak ketiga wajib ikut saat executable dibagikan.
+Copy-Item (Join-Path $root "THIRD_PARTY_NOTICES.md") (Join-Path $root "dist") -Force
 Write-Host "Selesai:"
 Write-Host "  CLI: $(Join-Path $root 'dist\denoise.exe')"
 Write-Host "  GUI: $(Join-Path $root 'dist\denoise-gui.exe')"
