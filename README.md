@@ -1,69 +1,110 @@
 # Local Denoise CLI
 
-CLI ringan untuk mengurangi noise konstan seperti desis kipas, AC, dan hiss pada
-audio atau track suara di dalam video. Semua pemrosesan berjalan di komputer
-lokal. Video disalin tanpa encode ulang; hanya audionya yang diproses.
+CLI ringan untuk mengurangi noise pada audio atau track suara di dalam video.
+Semua pemrosesan berjalan di komputer lokal. Video disalin tanpa encode ulang;
+hanya audionya yang diproses.
 
-Metode yang digunakan adalah spectral denoise dari FFmpeg. Metode ini cepat dan
-tidak membutuhkan GPU atau model AI. Hasil terbaik biasanya didapat untuk noise
-yang relatif stabil. Suara yang bertumpuk dengan ucapan, seperti musik keras atau
-orang lain berbicara, tidak dapat dipisahkan dengan sempurna oleh metode ini.
+Tersedia dua engine:
 
-## Instalasi
+- `spectral` (default): spectral denoise FFmpeg (`afftdn`). Cepat, tanpa model,
+  cocok untuk noise stabil seperti kipas, AC, hum, dan hiss.
+- `rnnoise`: neural network RNNoise (`arnndn`) yang dioptimalkan untuk ucapan.
+  Membutuhkan file model `.rnnn`.
 
-Pastikan Python 3.10 atau lebih baru tersedia, lalu jalankan dari folder proyek:
+## Cara Menjalankan
+
+Butuh Python 3.10 atau lebih baru. Dari folder proyek (PowerShell):
 
 ```powershell
+# 1. Sekali saja: buat virtual environment dan pasang program
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e .
+
+# 2. Jalankan
+denoise rekaman.wav
 ```
 
-Paket instalasi menyertakan dependensi yang menyediakan binary FFmpeg. Setelah
-instalasi selesai, pemrosesan tidak membutuhkan koneksi internet.
+Hasilnya tersimpan sebagai `rekaman.denoised.wav` di folder yang sama. Pada sesi
+terminal berikutnya cukup aktifkan lagi environment-nya dengan
+`.venv\Scripts\Activate.ps1`, lalu jalankan `denoise`.
 
-## Pemakaian
+Jika PowerShell menolak menjalankan `Activate.ps1`, jalankan sekali
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, atau panggil program
+langsung tanpa aktivasi: `.venv\Scripts\denoise.exe rekaman.wav`.
+
+Paket instalasi sudah menyertakan binary FFmpeg, sehingga setelah instalasi
+pemrosesan tidak membutuhkan koneksi internet.
+
+## Contoh Pemakaian
 
 ```powershell
-# Preset balanced dan nama output otomatis: rekaman.denoised.wav
-denoise rekaman.wav
-
 # Tentukan output dan gunakan pengurangan noise yang lebih kuat
 denoise wawancara.mp4 -o wawancara-bersih.mp4 --preset strong
 
 # Pemrosesan ringan agar detail musik lebih terjaga
 denoise musik.flac --preset light
 
-# Timpa output yang sudah ada
-denoise rekaman.mp3 --force
-```
-
-Preset yang tersedia:
-
-- `light`: noise reduction ringan, cocok untuk musik atau rekaman yang detailnya
-  perlu dijaga.
-- `balanced`: pilihan default untuk ucapan dan pemakaian umum.
-- `strong`: lebih agresif untuk noise yang jelas; dapat membuat suara terdengar
-  lebih tipis atau metalik.
-
-Parameter dapat diatur secara manual bila diperlukan:
-
-```powershell
+# Atur parameter secara manual
 denoise input.wav --reduction 18 --noise-floor -48
+
+# Engine neural RNNoise untuk rekaman ucapan
+denoise podcast.mp3 --engine rnnoise --model models\sh.rnnn
+
+# Lihat track audio di video, lalu proses hanya track 2
+denoise film.mkv --list-tracks
+denoise film.mkv --track 2
+
+# Timpa output yang sudah ada / lihat command FFmpeg tanpa memproses
+denoise rekaman.mp3 --force
+denoise rekaman.mp3 --dry-run
 ```
 
-Gunakan `denoise --help` untuk melihat semua opsi. Format audio yang didukung:
-WAV, FLAC, MP3, M4A, AAC, OGG, OPUS, dan WMA. Format video yang didukung: MP4,
-MOV, M4V, MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
+Gunakan `denoise --help` untuk melihat semua opsi.
 
-Jika ingin memakai instalasi FFmpeg sendiri, berikan lokasi executable melalui
+### Preset (engine spectral)
+
+- `light`: ringan, cocok untuk musik atau rekaman yang detailnya perlu dijaga.
+- `balanced`: default untuk ucapan dan pemakaian umum.
+- `strong`: lebih agresif; dapat membuat suara terdengar tipis atau metalik.
+
+### Model RNNoise
+
+Engine `rnnoise` membutuhkan file model `.rnnn`, misalnya dari repositori
+[rnnoise-models](https://github.com/GregorR/rnnoise-models). Untuk rekaman
+ucapan, model `somnolent-hogwash` (`sh.rnnn`) adalah pilihan awal yang baik.
+Lokasi model dapat diberikan lewat `--model` atau environment variable
+`DENOISE_RNNOISE_MODEL`. Engine ini bekerja paling baik untuk suara orang
+berbicara; untuk musik gunakan engine `spectral`.
+
+### Track audio pada video
+
+Secara default semua track audio pada video diproses. Gunakan `--track N`
+(nomor mulai dari 1, dapat diulang) untuk memilih track tertentu; track yang
+tidak dipilih tetap disertakan tanpa diubah. Untuk file audio, yang diproses
+adalah track pertama atau satu track yang dipilih.
+
+### Format
+
+Audio: WAV, FLAC, MP3, M4A, AAC, OGG, OGA, OPUS, dan WMA. Video: MP4, MOV, M4V,
+MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
+
+Untuk video, ekstensi output harus sama dengan input karena stream video disalin
+tanpa encode ulang. Jika ingin memakai FFmpeg sendiri, berikan lokasinya melalui
 `--ffmpeg` atau environment variable `DENOISE_FFMPEG`.
 
-Untuk video, gunakan ekstensi output yang sama dengan input. Program menyalin
-stream video tanpa encode ulang agar proses tetap cepat dan kualitas gambar tidak
-berubah; konversi container atau codec video belum didukung.
+## Executable Windows
 
-## Menjalankan tes
+Untuk membuat `dist\denoise.exe` yang dapat dipakai di komputer tanpa Python:
+
+```powershell
+.\scripts\build-exe.ps1
+```
+
+File tersebut sudah membawa FFmpeg sendiri dan dapat dipanggil langsung, misalnya
+`dist\denoise.exe rekaman.wav`.
+
+## Menjalankan Tes
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"

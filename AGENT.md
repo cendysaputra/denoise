@@ -1,30 +1,38 @@
 # Progress Proyek Local Denoise CLI
 
-Pembaruan terakhir: 13 September 2026
+Pembaruan terakhir: 30 September 2026
 
 ## Status
 
-Versi MVP `0.1.0` selesai dan dapat dijalankan secara lokal melalui command CLI.
-Project menggunakan Python dan binary FFmpeg dari paket `imageio-ffmpeg`, sehingga
-media tidak dikirim ke server atau layanan eksternal.
+Versi `0.2.0` selesai dan dapat dijalankan secara lokal melalui command CLI
+maupun executable Windows mandiri. Project menggunakan Python dan binary FFmpeg
+dari paket `imageio-ffmpeg`, sehingga media tidak dikirim ke server atau layanan
+eksternal.
 
 ## Yang Sudah Selesai
 
 - CLI `denoise` untuk memproses file audio dan track audio pada video.
-- Preset pengurangan noise `light`, `balanced`, dan `strong`.
-- Pengaturan manual melalui `--reduction` dan `--noise-floor`.
+- Engine `spectral` (FFmpeg `afftdn`) dengan preset `light`, `balanced`, dan
+  `strong`, serta pengaturan manual melalui `--reduction` dan `--noise-floor`.
+- Engine neural `rnnoise` (FFmpeg `arnndn`) melalui `--engine rnnoise` dengan
+  file model `.rnnn` dari `--model` atau `DENOISE_RNNOISE_MODEL`. Path model
+  di-escape agar aman untuk spasi, titik dua, koma, kurung siku, dan tanda kutip.
+- Dukungan beberapa track audio: default semua track video diproses, `--track N`
+  (dapat diulang) memilih track tertentu dan track lain disalin tanpa diubah.
+  `--list-tracks` menampilkan daftar track audio.
+- Probing input sebelum proses: file rusak/bukan media, video tanpa audio, dan
+  nomor track yang tidak ada menghasilkan pesan error yang jelas.
+- Indikator progres satu baris (persentase dari durasi media) saat stderr adalah
+  terminal; dapat dimatikan dengan `--quiet`. Ctrl+C menghentikan FFmpeg,
+  membersihkan file sementara, dan keluar dengan kode 130.
 - Nama output otomatis dengan pola `<nama>.denoised.<ekstensi>`.
 - Opsi `--output`, `--force`, `--ffmpeg`, `--dry-run`, dan `--version`.
-- Pemrosesan atomik melalui file sementara agar output yang gagal tidak dianggap
-  sebagai hasil akhir.
-- Stream video disalin tanpa encode ulang; hanya stream audio yang di-encode.
-- Pemilihan codec audio berdasarkan container output, termasuk MP3 untuk AVI,
-  MP2 untuk MPEG/MPG, OPUS untuk WEBM, dan AAC untuk MP4/MOV.
-- Validasi file input, ekstensi, rentang parameter, output yang sudah ada, dan
-  kecocokan jenis media input/output.
-- Validasi container video agar stream video yang disalin tetap kompatibel.
-- Pesan kegagalan FFmpeg diringkas menjadi error yang relevan bagi pengguna.
-- Dokumentasi instalasi dan pemakaian dalam `README.md`.
+- Pemrosesan atomik melalui file sementara.
+- Stream video disalin tanpa encode ulang; codec audio dipilih sesuai container
+  output (MP3 untuk AVI, MP2 untuk MPEG/MPG, OPUS untuk WEBM, AAC untuk MP4/MOV).
+- Skrip `scripts\build-exe.ps1` untuk membuat `dist\denoise.exe` (PyInstaller,
+  one-file, FFmpeg ikut dibundel).
+- Dokumentasi cara menjalankan dalam `README.md`.
 - Workflow GitHub Actions untuk pengujian di Windows dan Linux.
 
 ## Format yang Didukung
@@ -35,38 +43,31 @@ Video: MP4, MOV, M4V, MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
 
 ## Validasi Terakhir
 
-- 14 unit test lulus.
-- Seluruh modul berhasil melalui pemeriksaan `py_compile`.
-- `pip check` melaporkan tidak ada dependensi yang rusak.
-- Uji end-to-end WAV berhasil menggunakan FFmpeg 7.1.
-- Uji end-to-end MP4 berhasil; stream H.264 disalin dan audio AAC diproses ulang.
-- Entry point `.venv\Scripts\denoise.exe` berhasil dijalankan dan melaporkan
-  versi `0.1.0`.
+- 30 unit test lulus.
+- Uji end-to-end dengan FFmpeg 7.1: WAV, MP4, MKV dua track (semua track dan
+  `--track 2`), `--list-tracks`, engine rnnoise dengan path model berisi karakter
+  khusus, video tanpa audio, file bukan media, dan nomor track tidak valid.
+- Progres terverifikasi pada file FLAC 10 menit.
+- `dist\denoise.exe` hasil build berhasil memproses MKV dan WAV (rnnoise) tanpa
+  virtual environment aktif.
 
-## Cara Menjalankan
+## Catatan Lingkungan
 
-```powershell
-.venv\Scripts\Activate.ps1
-denoise rekaman.wav
-denoise wawancara.mp4 --preset strong -o wawancara-bersih.mp4
-```
-
-Gunakan `denoise --help` untuk melihat seluruh opsi.
+- Folder proyek pernah dipindah dari `Desktop\denoise` ke
+  `Desktop\Portfolio\denoise`. `.venv` telah diperbaiki (instalasi editable dan
+  skrip aktivasi menunjuk ke lokasi baru). Jika proyek dipindah lagi, buat ulang
+  `.venv` lalu jalankan `python -m pip install -e .`.
 
 ## Batasan Saat Ini
 
-- Metode spectral denoise paling efektif untuk noise stabil seperti kipas, AC,
-  hum, dan hiss.
-- Musik, suara orang lain, atau noise yang bertumpuk kuat dengan ucapan tidak
-  selalu dapat dipisahkan dengan bersih.
-- Untuk video dengan beberapa track audio, versi saat ini hanya memproses track
-  audio pertama.
+- Engine `spectral` paling efektif untuk noise stabil; noise yang bertumpuk kuat
+  dengan ucapan tidak selalu dapat dipisahkan dengan bersih.
+- Engine `rnnoise` dioptimalkan untuk ucapan dan dapat menghilangkan musik atau
+  suara non-ucapan. Output rnnoise di-resample ke 48 kHz.
+- Model RNNoise tidak dibundel; pengguna perlu mengunduh file `.rnnn` sendiri.
 
 ## Pengembangan Berikutnya
 
-- Menambahkan pilihan engine neural seperti RNNoise atau DeepFilterNet untuk
-  kualitas ucapan yang lebih baik.
-- Mendukung pemilihan dan pemrosesan beberapa track audio.
-- Menambahkan indikator progres yang lebih ringkas untuk video berdurasi panjang.
-- Menyediakan paket executable Windows agar dapat digunakan tanpa instalasi
-  Python manual.
+- Engine DeepFilterNet untuk kualitas ucapan yang lebih tinggi (butuh dependensi
+  PyTorch/ONNX yang besar).
+- Pemrosesan batch untuk banyak file atau satu folder sekaligus.

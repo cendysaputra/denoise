@@ -6,7 +6,15 @@ import sys
 from pathlib import Path
 
 from denoise_cli import __version__
-from denoise_cli.core import DenoiseError, PRESETS, default_output_path, process_media
+from denoise_cli.core import (
+    ENGINES,
+    PRESETS,
+    DenoiseError,
+    default_output_path,
+    probe_media,
+    process_media,
+    resolve_ffmpeg,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,11 +30,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="lokasi output (default: <nama>.denoised.<ekstensi>)",
     )
     parser.add_argument(
+        "-e",
+        "--engine",
+        choices=ENGINES,
+        default="spectral",
+        help=(
+            "metode denoise: spectral (FFT, tanpa model) atau rnnoise "
+            "(neural network untuk ucapan, butuh --model) (default: spectral)"
+        ),
+    )
+    parser.add_argument(
+        "-m",
+        "--model",
+        metavar="PATH",
+        help="file model .rnnn untuk engine rnnoise (atau DENOISE_RNNOISE_MODEL)",
+    )
+    parser.add_argument(
         "-p",
         "--preset",
         choices=tuple(PRESETS),
         default="balanced",
-        help="kekuatan denoise (default: balanced)",
+        help="kekuatan denoise untuk engine spectral (default: balanced)",
     )
     parser.add_argument(
         "--reduction",
@@ -41,6 +65,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="perkiraan noise floor, -80 sampai -20 dB",
     )
     parser.add_argument(
+        "-t",
+        "--track",
+        type=int,
+        action="append",
+        metavar="N",
+        help=(
+            "nomor track audio yang diproses, mulai dari 1; ulangi untuk beberapa "
+            "track (default video: semua track, audio: track pertama)"
+        ),
+    )
+    parser.add_argument(
+        "--list-tracks",
+        action="store_true",
+        help="tampilkan daftar track audio pada input lalu keluar",
+    )
+    parser.add_argument(
         "--ffmpeg",
         metavar="PATH",
         help="gunakan executable FFmpeg tertentu",
@@ -50,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="timpa file output jika sudah ada",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="jangan tampilkan indikator progres",
     )
     parser.add_argument(
         "--dry-run",
@@ -62,11 +108,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class ProgressPrinter:
+    """Tampilkan persentase progres pada satu baris di stderr."""
+
+    def __init__(self, stream=None) -> None:
+        self.stream = stream or sys.stderr
+        self.last_percent = -1
+
+    def __call__(self, fraction: float) -> None:
+        percent = int(fraction * 100)
+        if percent == self.last_percent:
+            return
+        self.last_percent = percent
+        filled = percent // 5
+        bar = "#" * filled + "-" * (20 - filled)
+        self.stream.write(f"\rMemproses [{bar}] {percent:3d}%")
+        self.stream.flush()
+
+    def finish(self) -> None:
+        if self.last_percent >= 0:
+            self.stream.write("\n")
+            self.stream.flush()
+
+
+def list_tracks(input_path: Path, ffmpeg_path: str | None) -> int:
+    input_path = input_path.expanduser().resolve()
+    if not input_path.is_file():
+        raise DenoiseError(f"File input tidak ditemukan: {input_path}")
+    info = probe_media(resolve_ffmpeg(ffmpeg_path), input_path)
+    if not info.audio_tracks:
+        print("Tidak ada track audio.")
+        return 0
+    for number, description in enumerate(info.audio_tracks, start=1):
+        print(f"{number}: {description}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output or default_output_path(args.input)
 
+    show_progress = not (args.quiet or args.dry_run) and sys.stderr.isatty()
+    progress = ProgressPrinter() if show_progress else None
+
     try:
+        if args.list_tracks:
+            return list_tracks(args.input, args.ffmpeg)
         command = process_media(
             input_path=args.input,
             output_path=output,
@@ -76,11 +163,24 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             ffmpeg_path=args.ffmpeg,
             dry_run=args.dry_run,
+            engine=args.engine,
+            model_path=args.model,
+            tracks=args.track,
+            on_progress=progress,
         )
     except DenoiseError as exc:
+        if progress:
+            progress.finish()
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        if progress:
+            progress.finish()
+        print("Dibatalkan.", file=sys.stderr)
+        return 130
 
+    if progress:
+        progress.finish()
     if args.dry_run:
         print(subprocess.list2cmdline(command))
     else:
@@ -90,4 +190,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
