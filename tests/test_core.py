@@ -1,3 +1,4 @@
+import threading
 import unittest
 from io import StringIO
 from pathlib import Path
@@ -202,6 +203,28 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(returncode, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(reported, [0.25, 0.5, 1.0])
+
+    def test_run_ffmpeg_stops_when_cancelled(self):
+        killed = []
+
+        class FakePopen:
+            def __init__(self, command, **_kwargs):
+                self.stdout = StringIO("out_time_us=1000000\nout_time_us=2000000\n")
+                self.stderr = StringIO("")
+
+            def wait(self):
+                return 0
+
+            def kill(self):
+                killed.append(True)
+
+        cancel = threading.Event()
+        cancel.set()
+        with patch("denoise_cli.core.subprocess.Popen", FakePopen):
+            with self.assertRaisesRegex(DenoiseError, "dibatalkan"):
+                _run_ffmpeg(["ffmpeg", "out.wav"], 4.0, None, cancel)
+
+        self.assertEqual(killed, [True])
 
     def test_process_media_reports_ffmpeg_stderr_and_cleans_temp_file(self):
         with TemporaryDirectory() as directory:

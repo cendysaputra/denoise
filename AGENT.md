@@ -30,8 +30,13 @@ eksternal.
 - Pemrosesan atomik melalui file sementara.
 - Stream video disalin tanpa encode ulang; codec audio dipilih sesuai container
   output (MP3 untuk AVI, MP2 untuk MPEG/MPG, OPUS untuk WEBM, AAC untuk MP4/MOV).
-- Skrip `scripts\build-exe.ps1` untuk membuat `dist\denoise.exe` (PyInstaller,
-  one-file, FFmpeg ikut dibundel).
+- Tampilan desktop Tkinter (`denoise-gui`, modul `denoise_cli.gui`): pilih
+  input/output lewat dialog, pilih engine/preset/model, centang track audio,
+  progress bar, tombol Batal, dan Buka folder hasil. Proses berjalan di thread
+  terpisah sehingga jendela tetap responsif; FFmpeg dijalankan tanpa jendela
+  konsol.
+- Skrip `scripts\build-exe.ps1` untuk membuat `dist\denoise.exe` (CLI) dan
+  `dist\denoise-gui.exe` (GUI) dengan PyInstaller, one-file, FFmpeg ikut dibundel.
 - Dokumentasi cara menjalankan dalam `README.md`.
 - Workflow GitHub Actions untuk pengujian di Windows dan Linux.
 
@@ -43,7 +48,9 @@ Video: MP4, MOV, M4V, MKV, WEBM, AVI, MPEG, MPG, TS, MTS, dan M2TS.
 
 ## Validasi Terakhir
 
-- 30 unit test lulus.
+- 35 unit test lulus (tes GUI otomatis dilewati bila Tk/display tidak tersedia).
+- GUI diuji dengan FFmpeg asli: proses track tertentu pada MKV, RNNoise, batal
+  di tengah file 10 menit (file sementara terhapus), dan video tanpa audio.
 - Uji end-to-end dengan FFmpeg 7.1: WAV, MP4, MKV dua track (semua track dan
   `--track 2`), `--list-tracks`, engine rnnoise dengan path model berisi karakter
   khusus, video tanpa audio, file bukan media, dan nomor track tidak valid.

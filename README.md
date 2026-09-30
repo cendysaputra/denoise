@@ -29,6 +29,29 @@ Hasilnya tersimpan sebagai `rekaman.denoised.wav` di folder yang sama. Pada sesi
 terminal berikutnya cukup aktifkan lagi environment-nya dengan
 `.venv\Scripts\Activate.ps1`, lalu jalankan `denoise`.
 
+## Tampilan Desktop (UI)
+
+Jika lebih suka tanpa mengetik perintah, buka tampilan desktop:
+
+```powershell
+denoise-gui
+```
+
+Tanpa aktivasi environment, jalankan `.venv\Scripts\denoise-gui.exe` atau
+`dist\denoise-gui.exe` (lihat bagian Executable Windows). File tersebut juga
+bisa dibuka dengan klik dua kali.
+
+Langkah pemakaian:
+
+1. Klik **Pilih...** di baris *File input*, lalu pilih audio atau video dari
+   folder mana saja.
+2. Lokasi hasil terisi otomatis (`<nama>.denoised.<ekstensi>` di folder yang
+   sama). Klik **Ubah...** untuk menyimpan di tempat lain.
+3. Pilih metode dan kekuatan. Untuk RNNoise, pilih juga file model `.rnnn`.
+4. Centang track audio yang ingin dibersihkan.
+5. Klik **Proses**. Progres tampil di bar; **Batal** menghentikan proses, dan
+   **Buka folder hasil** muncul setelah selesai.
+
 Jika PowerShell menolak menjalankan `Activate.ps1`, jalankan sekali
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, atau panggil program
 langsung tanpa aktivasi: `.venv\Scripts\denoise.exe rekaman.wav`.
@@ -95,14 +118,18 @@ tanpa encode ulang. Jika ingin memakai FFmpeg sendiri, berikan lokasinya melalui
 
 ## Executable Windows
 
-Untuk membuat `dist\denoise.exe` yang dapat dipakai di komputer tanpa Python:
+Untuk membuat executable yang dapat dipakai di komputer tanpa Python:
 
 ```powershell
 .\scripts\build-exe.ps1
 ```
 
-File tersebut sudah membawa FFmpeg sendiri dan dapat dipanggil langsung, misalnya
-`dist\denoise.exe rekaman.wav`.
+Hasilnya ada di folder `dist`:
+
+- `denoise-gui.exe`: tampilan desktop, cukup klik dua kali.
+- `denoise.exe`: versi command line, misalnya `dist\denoise.exe rekaman.wav`.
+
+Keduanya sudah membawa FFmpeg sendiri dan dapat disalin ke folder mana saja.
 
 ## Menjalankan Tes
 

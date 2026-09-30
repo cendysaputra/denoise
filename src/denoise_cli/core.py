@@ -39,6 +39,9 @@ VIDEO_EXTENSIONS = {
 
 ENGINES = ("spectral", "rnnoise")
 
+# Cegah jendela konsol FFmpeg muncul saat dipanggil dari aplikasi GUI di Windows.
+_SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 @dataclass(frozen=True)
 class Preset:
@@ -158,10 +161,12 @@ def probe_media(ffmpeg_path: str, input_path: Path) -> MediaInfo:
         completed = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-nostdin", "-i", str(input_path)],
             check=False,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except OSError as exc:
         raise DenoiseError(f"Tidak dapat menjalankan FFmpeg: {exc}") from exc
@@ -354,16 +359,22 @@ def _run_ffmpeg(
     command: list[str],
     duration: float | None = None,
     on_progress: Callable[[float], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[int, str]:
-    """Jalankan FFmpeg dan laporkan progres (0.0 sampai 1.0) bila memungkinkan."""
+    """Jalankan FFmpeg dan laporkan progres (0.0 sampai 1.0) bila memungkinkan.
+
+    Jika `cancel` di-set, FFmpeg dihentikan dan DenoiseError dilempar.
+    """
     full_command = [command[0], "-nostats", "-progress", "pipe:1", *command[1:]]
     process = subprocess.Popen(
         full_command,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=_SUBPROCESS_FLAGS,
     )
     stderr_chunks: list[str] = []
     reader = threading.Thread(
@@ -372,6 +383,8 @@ def _run_ffmpeg(
     reader.start()
     try:
         for line in process.stdout:
+            if cancel is not None and cancel.is_set():
+                raise DenoiseError("Proses dibatalkan.")
             if on_progress is None:
                 continue
             if line.strip() == "progress=end":
@@ -403,6 +416,7 @@ def process_media(
     model_path: str | os.PathLike[str] | None = None,
     tracks: Sequence[int] | None = None,
     on_progress: Callable[[float], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> list[str]:
     """Proses media. `tracks` berisi nomor track audio mulai dari 1."""
     input_path = input_path.expanduser().resolve()
@@ -441,7 +455,7 @@ def process_media(
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        returncode, stderr = _run_ffmpeg(command, info.duration, on_progress)
+        returncode, stderr = _run_ffmpeg(command, info.duration, on_progress, cancel)
         if returncode != 0:
             details = stderr.strip()
             if details:

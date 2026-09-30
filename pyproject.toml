@@ -20,6 +20,9 @@ build = [
 [project.scripts]
 denoise = "denoise_cli.cli:main"
 
+[project.gui-scripts]
+denoise-gui = "denoise_cli.gui:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

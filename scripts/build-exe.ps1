@@ -1,4 +1,5 @@
-# Membuat dist\denoise.exe yang dapat dijalankan tanpa instalasi Python.
+# Membuat dist\denoise.exe (CLI) dan dist\denoise-gui.exe (tampilan desktop)
+# yang dapat dijalankan tanpa instalasi Python.
 # Jalankan dari folder proyek: .\scripts\build-exe.ps1
 $ErrorActionPreference = "Stop"
 
@@ -27,6 +28,20 @@ if ($LASTEXITCODE -ne 0) { throw "Gagal memasang dependensi build." }
     src\denoise_cli\__main__.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable." }
 
+& $python -m PyInstaller `
+    --noconfirm `
+    --clean `
+    --onefile `
+    --windowed `
+    --name denoise-gui `
+    --paths src `
+    --collect-binaries imageio_ffmpeg `
+    --specpath build `
+    src\denoise_cli\gui.py
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable GUI." }
+
 & (Join-Path $root "dist\denoise.exe") --version
 if ($LASTEXITCODE -ne 0) { throw "Executable hasil build gagal dijalankan." }
-Write-Host "Selesai: $(Join-Path $root 'dist\denoise.exe')"
+Write-Host "Selesai:"
+Write-Host "  CLI: $(Join-Path $root 'dist\denoise.exe')"
+Write-Host "  GUI: $(Join-Path $root 'dist\denoise-gui.exe')"
