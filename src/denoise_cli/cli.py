@@ -7,6 +7,7 @@ from pathlib import Path
 
 from denoise_cli import __version__
 from denoise_cli.core import (
+    DEFAULT_ENGINE,
     ENGINES,
     PRESETS,
     DenoiseError,
@@ -33,10 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
         "-e",
         "--engine",
         choices=ENGINES,
-        default="spectral",
+        default=DEFAULT_ENGINE,
         help=(
-            "metode denoise: spectral (FFT, tanpa model) atau rnnoise "
-            "(neural network untuk ucapan, butuh --model) (default: spectral)"
+            "metode denoise: deepfilter (AI DeepFilterNet, terbaik untuk ucapan; "
+            "diunduh otomatis saat pertama dipakai), rnnoise (neural ringan, butuh "
+            "--model), atau spectral (FFT, untuk desis stabil/musik) "
+            f"(default: {DEFAULT_ENGINE})"
         ),
     )
     parser.add_argument(
@@ -50,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--preset",
         choices=tuple(PRESETS),
         default="balanced",
-        help="kekuatan denoise untuk engine spectral (default: balanced)",
+        help="kekuatan denoise untuk engine deepfilter/spectral (default: balanced)",
     )
     parser.add_argument(
         "--reduction",
@@ -114,15 +117,29 @@ class ProgressPrinter:
     def __init__(self, stream=None) -> None:
         self.stream = stream or sys.stderr
         self.last_percent = -1
+        self.label = "Memproses..."
+        self.width = 0
 
     def __call__(self, fraction: float) -> None:
         percent = int(fraction * 100)
         if percent == self.last_percent:
             return
         self.last_percent = percent
+        self._draw()
+
+    def status(self, message: str) -> None:
+        self.label = message
+        self._draw()
+
+    def _draw(self) -> None:
+        percent = max(self.last_percent, 0)
         filled = percent // 5
         bar = "#" * filled + "-" * (20 - filled)
-        self.stream.write(f"\rMemproses [{bar}] {percent:3d}%")
+        line = f"[{bar}] {percent:3d}%  {self.label}"
+        # Tutup sisa teks baris sebelumnya yang lebih panjang.
+        padding = " " * max(self.width - len(line), 0)
+        self.width = len(line)
+        self.stream.write(f"\r{line}{padding}")
         self.stream.flush()
 
     def finish(self) -> None:
@@ -150,11 +167,17 @@ def main(argv: list[str] | None = None) -> int:
 
     show_progress = not (args.quiet or args.dry_run) and sys.stderr.isatty()
     progress = ProgressPrinter() if show_progress else None
+    if progress:
+        on_status = progress.status
+    elif not (args.quiet or args.dry_run):
+        on_status = lambda message: print(message, file=sys.stderr)  # noqa: E731
+    else:
+        on_status = None
 
     try:
         if args.list_tracks:
             return list_tracks(args.input, args.ffmpeg)
-        command = process_media(
+        commands = process_media(
             input_path=args.input,
             output_path=output,
             preset_name=args.preset,
@@ -167,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             model_path=args.model,
             tracks=args.track,
             on_progress=progress,
+            on_status=on_status,
         )
     except DenoiseError as exc:
         if progress:
@@ -182,7 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     if progress:
         progress.finish()
     if args.dry_run:
-        print(subprocess.list2cmdline(command))
+        for command in commands:
+            print(subprocess.list2cmdline(command))
     else:
         print(f"Selesai: {output.expanduser().resolve()}")
     return 0

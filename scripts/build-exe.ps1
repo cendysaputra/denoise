@@ -16,6 +16,14 @@ if (-not (Test-Path $python)) {
 & $python -m pip install --quiet -e ".[build]"
 if ($LASTEXITCODE -ne 0) { throw "Gagal memasang dependensi build." }
 
+# Bundel engine AI DeepFilterNet agar executable dapat dipakai tanpa internet.
+# Binary diunduh ke cache (dengan verifikasi SHA-256) bila belum ada.
+$deepFilter = & $python -c "from denoise_cli import deepfilter; print(deepfilter.resolve_binary())"
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $deepFilter)) {
+    throw "Gagal menyiapkan binary DeepFilterNet."
+}
+$deepFilterArg = "$deepFilter;deepfilter"
+
 & $python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -24,6 +32,7 @@ if ($LASTEXITCODE -ne 0) { throw "Gagal memasang dependensi build." }
     --name denoise `
     --paths src `
     --collect-binaries imageio_ffmpeg `
+    --add-binary $deepFilterArg `
     --specpath build `
     src\denoise_cli\__main__.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable." }
@@ -36,6 +45,7 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable." }
     --name denoise-gui `
     --paths src `
     --collect-binaries imageio_ffmpeg `
+    --add-binary $deepFilterArg `
     --specpath build `
     src\denoise_cli\gui.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller gagal membuat executable GUI." }

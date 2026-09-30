@@ -242,7 +242,7 @@ class CoreTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(DenoiseError, "detail kegagalan ffmpeg"):
-                    process_media(source, output)
+                    process_media(source, output, engine="spectral")
 
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".*.tmp.wav")), [])
@@ -263,7 +263,7 @@ class CoreTests(unittest.TestCase):
                 patch("denoise_cli.core.probe_media", return_value=AUDIO_INFO),
                 patch("denoise_cli.core._run_ffmpeg", side_effect=create_temp_output),
             ):
-                process_media(source, output)
+                process_media(source, output, engine="spectral")
 
             self.assertEqual(output.read_bytes(), b"processed")
             self.assertEqual(list(output.parent.glob(".*.tmp.wav")), [])

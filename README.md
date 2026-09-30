@@ -4,12 +4,21 @@ CLI ringan untuk mengurangi noise pada audio atau track suara di dalam video.
 Semua pemrosesan berjalan di komputer lokal. Video disalin tanpa encode ulang;
 hanya audionya yang diproses.
 
-Tersedia dua engine:
+Tersedia tiga engine:
 
-- `spectral` (default): spectral denoise FFmpeg (`afftdn`). Cepat, tanpa model,
-  cocok untuk noise stabil seperti kipas, AC, hum, dan hiss.
-- `rnnoise`: neural network RNNoise (`arnndn`) yang dioptimalkan untuk ucapan.
-  Membutuhkan file model `.rnnn`.
+- `deepfilter` (default): AI [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)
+  untuk suara orang. Membersihkan noise keras dan tidak stabil seperti ketikan
+  keyboard, keramaian, atau lalu lintas. Binary-nya (sekitar 27 MB) diunduh
+  otomatis sekali saat pertama dipakai, diverifikasi dengan SHA-256, lalu
+  disimpan di `%LOCALAPPDATA%\local-denoise`. Setelah itu berjalan offline.
+- `rnnoise`: neural network RNNoise (`arnndn`) yang lebih ringan. Membutuhkan
+  file model `.rnnn`.
+- `spectral`: spectral denoise FFmpeg (`afftdn`). Hanya efektif untuk desis
+  stabil seperti kipas, AC, atau hum; cocok untuk musik karena tidak membuang
+  suara non-ucapan.
+
+Engine AI membuang semua suara yang bukan ucapan, termasuk musik latar. Untuk
+rekaman musik gunakan `--engine spectral`.
 
 ## Cara Menjalankan
 
@@ -47,7 +56,8 @@ Langkah pemakaian:
    folder mana saja.
 2. Lokasi hasil terisi otomatis (`<nama>.denoised.<ekstensi>` di folder yang
    sama). Klik **Ubah...** untuk menyimpan di tempat lain.
-3. Pilih metode dan kekuatan. Untuk RNNoise, pilih juga file model `.rnnn`.
+3. Pilih metode dan kekuatan. Default *AI DeepFilterNet - Seimbang* sudah cocok
+   untuk rekaman suara. Untuk RNNoise, pilih juga file model `.rnnn`.
 4. Centang track audio yang ingin dibersihkan.
 5. Klik **Proses**. Progres tampil di bar; **Batal** menghentikan proses, dan
    **Buka folder hasil** muncul setelah selesai.
@@ -56,20 +66,21 @@ Jika PowerShell menolak menjalankan `Activate.ps1`, jalankan sekali
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, atau panggil program
 langsung tanpa aktivasi: `.venv\Scripts\denoise.exe rekaman.wav`.
 
-Paket instalasi sudah menyertakan binary FFmpeg, sehingga setelah instalasi
-pemrosesan tidak membutuhkan koneksi internet.
+Paket instalasi sudah menyertakan binary FFmpeg. Koneksi internet hanya
+dibutuhkan sekali, saat engine AI dipakai pertama kali.
 
 ## Contoh Pemakaian
 
 ```powershell
-# Tentukan output dan gunakan pengurangan noise yang lebih kuat
+# Tentukan output dan buang noise semaksimal mungkin
 denoise wawancara.mp4 -o wawancara-bersih.mp4 --preset strong
 
-# Pemrosesan ringan agar detail musik lebih terjaga
-denoise musik.flac --preset light
+# Sisakan sedikit suasana ruangan agar suara tidak terlalu "kering"
+denoise vlog.mp4 --preset light
 
-# Atur parameter secara manual
-denoise input.wav --reduction 18 --noise-floor -48
+# Rekaman musik: pakai spectral agar musiknya tidak ikut dibuang
+denoise musik.flac --engine spectral --preset light
+denoise input.wav --engine spectral --reduction 18 --noise-floor -48
 
 # Engine neural RNNoise untuk rekaman ucapan
 denoise podcast.mp3 --engine rnnoise --model models\sh.rnnn
@@ -78,18 +89,28 @@ denoise podcast.mp3 --engine rnnoise --model models\sh.rnnn
 denoise film.mkv --list-tracks
 denoise film.mkv --track 2
 
-# Timpa output yang sudah ada / lihat command FFmpeg tanpa memproses
+# Timpa output yang sudah ada / lihat command tanpa memproses
 denoise rekaman.mp3 --force
 denoise rekaman.mp3 --dry-run
 ```
 
 Gunakan `denoise --help` untuk melihat semua opsi.
 
-### Preset (engine spectral)
+### Preset
 
-- `light`: ringan, cocok untuk musik atau rekaman yang detailnya perlu dijaga.
-- `balanced`: default untuk ucapan dan pemakaian umum.
-- `strong`: lebih agresif; dapat membuat suara terdengar tipis atau metalik.
+| Preset | `deepfilter` | `spectral` |
+|---|---|---|
+| `light` | redaman dibatasi 20 dB, sisa suasana ruangan masih terdengar | ringan, detail musik terjaga |
+| `balanced` (default) | redaman penuh | untuk pemakaian umum |
+| `strong` | redaman penuh + post-filter, paling bersih | agresif, suara bisa terdengar metalik |
+
+Pada contoh rekaman berisik (keyboard dan keramaian), engine `deepfilter`
+menurunkan noise di jeda bicara sekitar 22 dB dengan preset `balanced` dan 31 dB
+dengan `strong`. Engine `spectral` praktis tidak berpengaruh pada noise seperti
+itu.
+
+Jika ingin memakai binary DeepFilterNet sendiri, set environment variable
+`DENOISE_DEEPFILTER` ke lokasi file `deep-filter`.
 
 ### Model RNNoise
 
@@ -129,7 +150,8 @@ Hasilnya ada di folder `dist`:
 - `denoise-gui.exe`: tampilan desktop, cukup klik dua kali.
 - `denoise.exe`: versi command line, misalnya `dist\denoise.exe rekaman.wav`.
 
-Keduanya sudah membawa FFmpeg sendiri dan dapat disalin ke folder mana saja.
+Keduanya sudah membawa FFmpeg dan engine AI DeepFilterNet sendiri, sehingga
+bisa langsung dipakai tanpa internet dan dapat disalin ke folder mana saja.
 
 ## Menjalankan Tes
 

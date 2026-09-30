@@ -9,7 +9,7 @@ from denoise_cli.core import MediaInfo
 try:
     import tkinter as tk
 
-    from denoise_cli.gui import DenoiseApp
+    from denoise_cli.gui import PRESET_LABELS, DenoiseApp
 
     _root = tk.Tk()
     _root.destroy()
@@ -82,14 +82,14 @@ class GuiTests(unittest.TestCase):
             ):
                 self.app.set_input(source)
                 self.wait_for(lambda: len(self.app.track_vars) == 1)
-                self.app.preset_var.set("Kuat - noise yang jelas")
+                self.app.preset_var.set(PRESET_LABELS["strong"])
                 self.app._start()
                 self.wait_for(lambda: self.app.status_var.get().startswith("Selesai"))
 
         kwargs = process.call_args.kwargs
         self.assertEqual(kwargs["preset_name"], "strong")
         self.assertEqual(kwargs["tracks"], [1])
-        self.assertEqual(kwargs["engine"], "spectral")
+        self.assertEqual(kwargs["engine"], "deepfilter")
         self.assertEqual(self.app.progress["value"], 100)
         self.assertEqual(str(self.app.run_button["state"]), "normal")
 

@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from denoise_cli import __version__
 from denoise_cli.core import (
     AUDIO_EXTENSIONS,
+    DEFAULT_ENGINE,
     PRESETS,
     VIDEO_EXTENSIONS,
     DenoiseError,
@@ -36,10 +37,16 @@ MEDIA_FILETYPES = [
 ]
 
 PRESET_LABELS = {
-    "light": "Ringan - jaga detail musik",
-    "balanced": "Seimbang - ucapan dan umum",
-    "strong": "Kuat - noise yang jelas",
+    "light": "Ringan - sisakan sedikit suasana ruangan",
+    "balanced": "Seimbang - disarankan",
+    "strong": "Kuat - buang noise semaksimal mungkin",
 }
+
+ENGINE_LABELS = (
+    ("deepfilter", "AI DeepFilterNet - terbaik untuk suara orang (disarankan)"),
+    ("rnnoise", "RNNoise - neural ringan, butuh file model .rnnn"),
+    ("spectral", "Spectral - desis stabil seperti kipas/AC, atau musik"),
+)
 
 
 class DenoiseApp(ttk.Frame):
@@ -53,11 +60,12 @@ class DenoiseApp(ttk.Frame):
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar()
-        self.engine_var = tk.StringVar(value="spectral")
+        self.engine_var = tk.StringVar(value=DEFAULT_ENGINE)
         self.preset_var = tk.StringVar(value=PRESET_LABELS["balanced"])
         self.model_var = tk.StringVar(value=os.environ.get("DENOISE_RNNOISE_MODEL", ""))
         self.status_var = tk.StringVar(value="Pilih file audio atau video untuk mulai.")
         self.track_vars: list[tk.BooleanVar] = []
+        self.stage_text = "Memproses..."
 
         self._build()
         self._update_engine_state()
@@ -93,20 +101,14 @@ class DenoiseApp(ttk.Frame):
         ttk.Label(settings, text="Metode").grid(row=0, column=0, sticky="w", pady=4)
         engines = ttk.Frame(settings)
         engines.grid(row=0, column=1, columnspan=2, sticky="w", padx=8)
-        ttk.Radiobutton(
-            engines,
-            text="Spectral (cepat, noise stabil)",
-            value="spectral",
-            variable=self.engine_var,
-            command=self._update_engine_state,
-        ).pack(side="left")
-        ttk.Radiobutton(
-            engines,
-            text="RNNoise (neural, khusus ucapan)",
-            value="rnnoise",
-            variable=self.engine_var,
-            command=self._update_engine_state,
-        ).pack(side="left", padx=(16, 0))
+        for value, label in ENGINE_LABELS:
+            ttk.Radiobutton(
+                engines,
+                text=label,
+                value=value,
+                variable=self.engine_var,
+                command=self._update_engine_state,
+            ).pack(anchor="w")
 
         ttk.Label(settings, text="Kekuatan").grid(row=1, column=0, sticky="w", pady=4)
         self.preset_box = ttk.Combobox(
@@ -174,9 +176,9 @@ class DenoiseApp(ttk.Frame):
             entry.xview_moveto(1.0)
 
     def _update_engine_state(self) -> None:
-        spectral = self.engine_var.get() == "spectral"
-        self.preset_box.configure(state="readonly" if spectral else "disabled")
-        model_state = "disabled" if spectral else "normal"
+        engine = self.engine_var.get()
+        self.preset_box.configure(state="disabled" if engine == "rnnoise" else "readonly")
+        model_state = "normal" if engine == "rnnoise" else "disabled"
         self.model_entry.configure(state=model_state)
         self.model_button.configure(state=model_state)
 
@@ -290,13 +292,15 @@ class DenoiseApp(ttk.Frame):
         self.cancel_event = threading.Event()
         self._set_running(True)
         self.progress.configure(value=0)
-        self._set_status("Memproses...")
+        self.stage_text = "Memproses..."
+        self._set_status(self.stage_text)
 
         def worker(cancel: threading.Event) -> None:
             try:
                 process_media(
                     **options,
                     on_progress=lambda fraction: self.events.put(("progress", fraction)),
+                    on_status=lambda message: self.events.put(("status", message)),
                     cancel=cancel,
                 )
                 self.events.put(("done", output_path))
@@ -370,7 +374,10 @@ class DenoiseApp(ttk.Frame):
         elif kind == "progress":
             percent = event[1] * 100
             self.progress.configure(value=percent)
-            self._set_status(f"Memproses... {percent:.0f}%")
+            self._set_status(f"{self.stage_text} {percent:.0f}%")
+        elif kind == "status":
+            self.stage_text = event[1]
+            self._set_status(f"{self.stage_text} {self.progress['value']:.0f}%")
         elif kind == "done":
             self.last_output = Path(event[1]).expanduser().resolve()
             self.progress.configure(value=100)

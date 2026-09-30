@@ -4,11 +4,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
+
+from denoise_cli import deepfilter
 
 
 AUDIO_EXTENSIONS = {
@@ -37,7 +40,8 @@ VIDEO_EXTENSIONS = {
     ".webm",
 }
 
-ENGINES = ("spectral", "rnnoise")
+ENGINES = ("deepfilter", "rnnoise", "spectral")
+DEFAULT_ENGINE = "deepfilter"
 
 # Cegah jendela konsol FFmpeg muncul saat dipanggil dari aplikasi GUI di Windows.
 _SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -403,6 +407,174 @@ def _run_ffmpeg(
     return returncode, "".join(stderr_chunks)
 
 
+def build_extract_command(
+    ffmpeg_path: str, input_path: Path, tracks: Sequence[int], work_dir: Path
+) -> list[str]:
+    """Ekstrak track audio terpilih ke WAV 48 kHz (format masukan DeepFilterNet)."""
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(input_path),
+    ]
+    for track in tracks:
+        command.extend(
+            [
+                "-map",
+                f"0:a:{track}",
+                "-vn",
+                "-ar",
+                "48000",
+                "-c:a",
+                "pcm_s16le",
+                str(work_dir / f"track{track}.wav"),
+            ]
+        )
+    return command
+
+
+def build_remux_command(
+    ffmpeg_path: str,
+    input_path: Path,
+    output_path: Path,
+    processed: dict[int, Path],
+    audio_track_count: int,
+) -> list[str]:
+    """Gabungkan audio hasil DeepFilterNet kembali ke container output.
+
+    `processed` memetakan indeks track audio (mulai 0) ke file WAV hasil proses.
+    """
+    kind = _matching_media_kind(input_path, output_path)
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(input_path),
+    ]
+    order = sorted(processed)
+    for track in order:
+        command.extend(["-i", str(processed[track])])
+    input_index = {track: position + 1 for position, track in enumerate(order)}
+
+    if kind == "audio":
+        command.extend(["-map", f"{input_index[order[0]]}:a:0", "-map_metadata", "0"])
+        command.extend(_audio_codec_args(output_path, kind))
+        command.append(str(output_path))
+        return command
+
+    command.extend(["-map", "0:v:0"])
+    for stream in range(audio_track_count):
+        if stream in processed:
+            command.extend(["-map", f"{input_index[stream]}:a:0"])
+        else:
+            command.extend(["-map", f"0:a:{stream}"])
+    command.extend(
+        ["-map", "0:s?", "-map_metadata", "0", "-c:v", "copy", "-c:s", "copy"]
+    )
+    for stream in range(audio_track_count):
+        if stream in processed:
+            # Pertahankan metadata track (bahasa, judul) dari track aslinya.
+            command.extend([f"-map_metadata:s:a:{stream}", f"0:s:a:{stream}"])
+            command.extend(_audio_codec_args(output_path, kind, stream))
+        else:
+            command.extend([f"-c:a:{stream}", "copy"])
+    command.append(str(output_path))
+    return command
+
+
+def _check_ffmpeg(returncode: int, stderr: str) -> None:
+    if returncode == 0:
+        return
+    details = stderr.strip()
+    if details:
+        lines = [line.strip() for line in details.splitlines() if line.strip()]
+        summary = "\n".join(lines[-8:])
+        if len(summary) > 2000:
+            summary = f"…{summary[-1999:]}"
+        raise DenoiseError(f"FFmpeg gagal memproses media:\n{summary}")
+    raise DenoiseError(f"FFmpeg gagal memproses media (kode {returncode}).")
+
+
+def _stage(
+    on_progress: Callable[[float], None] | None, start: float, end: float
+) -> Callable[[float], None] | None:
+    """Petakan progres satu tahap (0..1) ke rentang [start, end] progres total."""
+    if on_progress is None:
+        return None
+    return lambda fraction: on_progress(start + (end - start) * fraction)
+
+
+def _run_deepfilter_pipeline(
+    ffmpeg_path: str,
+    input_path: Path,
+    temp_output: Path,
+    info: MediaInfo,
+    selected: list[int],
+    preset_name: str,
+    dry_run: bool,
+    on_progress: Callable[[float], None] | None,
+    on_status: Callable[[str], None] | None,
+    cancel: threading.Event | None,
+) -> list[list[str]]:
+    """Ekstrak audio -> DeepFilterNet -> gabungkan kembali ke output sementara."""
+    status = on_status or (lambda _message: None)
+    try:
+        binary = deepfilter.resolve_binary(
+            allow_download=not dry_run,
+            on_status=status,
+            on_progress=_stage(on_progress, 0.0, 0.05),
+            cancel=cancel,
+        )
+        with tempfile.TemporaryDirectory(prefix="denoise-") as work:
+            work_dir = Path(work)
+            out_dir = work_dir / "out"
+            processed = {track: out_dir / f"track{track}.wav" for track in selected}
+            extract = build_extract_command(ffmpeg_path, input_path, selected, work_dir)
+            filter_command = deepfilter.build_command(
+                binary or deepfilter.binary_name(),
+                [work_dir / f"track{track}.wav" for track in selected],
+                out_dir,
+                preset_name,
+            )
+            remux = build_remux_command(
+                ffmpeg_path, input_path, temp_output, processed, len(info.audio_tracks)
+            )
+            commands = [extract, filter_command, remux]
+            if dry_run:
+                return commands
+
+            status("Menyiapkan audio...")
+            _check_ffmpeg(
+                *_run_ffmpeg(
+                    extract, info.duration, _stage(on_progress, 0.05, 0.15), cancel
+                )
+            )
+            status("Membersihkan noise dengan AI...")
+            deepfilter.run(
+                filter_command,
+                (info.duration or 60.0) * len(selected),
+                _stage(on_progress, 0.15, 0.85),
+                cancel,
+            )
+            if not all(path.is_file() for path in processed.values()):
+                raise DenoiseError("DeepFilterNet selesai tetapi tidak menghasilkan audio.")
+            status("Menyimpan hasil...")
+            _check_ffmpeg(
+                *_run_ffmpeg(remux, info.duration, _stage(on_progress, 0.85, 1.0), cancel)
+            )
+            return commands
+    except deepfilter.DeepFilterError as exc:
+        raise DenoiseError(str(exc)) from exc
+
+
 def process_media(
     input_path: Path,
     output_path: Path,
@@ -412,13 +584,17 @@ def process_media(
     force: bool = False,
     ffmpeg_path: str | None = None,
     dry_run: bool = False,
-    engine: str = "spectral",
+    engine: str = DEFAULT_ENGINE,
     model_path: str | os.PathLike[str] | None = None,
     tracks: Sequence[int] | None = None,
     on_progress: Callable[[float], None] | None = None,
     cancel: threading.Event | None = None,
-) -> list[str]:
-    """Proses media. `tracks` berisi nomor track audio mulai dari 1."""
+    on_status: Callable[[str], None] | None = None,
+) -> list[list[str]]:
+    """Proses media dan kembalikan daftar command yang (akan) dijalankan.
+
+    `tracks` berisi nomor track audio mulai dari 1.
+    """
     input_path = input_path.expanduser().resolve()
     output_path = output_path.expanduser().resolve()
 
@@ -432,9 +608,21 @@ def process_media(
             f"File output sudah ada: {output_path}. Gunakan --force untuk menimpanya."
         )
 
-    audio_filter = denoise_filter(
-        preset_name, reduction, noise_floor, engine=engine, model_path=model_path
-    )
+    if engine == "deepfilter":
+        if reduction is not None or noise_floor is not None:
+            raise DenoiseError(
+                "--reduction dan --noise-floor hanya berlaku untuk engine spectral."
+            )
+        if preset_name not in deepfilter.PRESET_ARGS:
+            raise DenoiseError(
+                f"Preset '{preset_name}' tidak dikenal. Pilihan yang tersedia: "
+                f"{', '.join(deepfilter.PRESET_ARGS)}."
+            )
+        audio_filter = None
+    else:
+        audio_filter = denoise_filter(
+            preset_name, reduction, noise_floor, engine=engine, model_path=model_path
+        )
     resolved_ffmpeg = resolve_ffmpeg(ffmpeg_path)
     info = probe_media(resolved_ffmpeg, input_path)
     selected = select_tracks(kind, len(info.audio_tracks), tracks)
@@ -442,34 +630,43 @@ def process_media(
     temp_output = output_path.with_name(
         f".{output_path.stem}.{uuid4().hex}.tmp{output_path.suffix}"
     )
-    command = build_ffmpeg_command(
-        resolved_ffmpeg,
-        input_path,
-        temp_output,
-        audio_filter,
-        audio_track_count=len(info.audio_tracks),
-        tracks=selected,
-    )
-    if dry_run:
-        return command
-
     try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        returncode, stderr = _run_ffmpeg(command, info.duration, on_progress, cancel)
-        if returncode != 0:
-            details = stderr.strip()
-            if details:
-                lines = [line.strip() for line in details.splitlines() if line.strip()]
-                summary = "\n".join(lines[-8:])
-                if len(summary) > 2000:
-                    summary = f"…{summary[-1999:]}"
-                raise DenoiseError(f"FFmpeg gagal memproses media:\n{summary}")
-            raise DenoiseError(f"FFmpeg gagal memproses media (kode {returncode}).")
+        if not dry_run:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        if audio_filter is None:
+            commands = _run_deepfilter_pipeline(
+                resolved_ffmpeg,
+                input_path,
+                temp_output,
+                info,
+                selected,
+                preset_name,
+                dry_run,
+                on_progress,
+                on_status,
+                cancel,
+            )
+        else:
+            command = build_ffmpeg_command(
+                resolved_ffmpeg,
+                input_path,
+                temp_output,
+                audio_filter,
+                audio_track_count=len(info.audio_tracks),
+                tracks=selected,
+            )
+            commands = [command]
+            if not dry_run:
+                if on_status:
+                    on_status("Membersihkan noise...")
+                _check_ffmpeg(*_run_ffmpeg(command, info.duration, on_progress, cancel))
+        if dry_run:
+            return commands
         if not temp_output.is_file():
             raise DenoiseError("FFmpeg selesai tetapi tidak menghasilkan file output.")
         temp_output.replace(output_path)
     except OSError as exc:
-        raise DenoiseError(f"Tidak dapat menjalankan FFmpeg: {exc}") from exc
+        raise DenoiseError(f"Tidak dapat menjalankan proses: {exc}") from exc
     finally:
         try:
             temp_output.unlink(missing_ok=True)
@@ -477,4 +674,5 @@ def process_media(
             # Jangan menutupi penyebab kegagalan utama jika file sementara terkunci.
             pass
 
-    return command
+    return commands
+
